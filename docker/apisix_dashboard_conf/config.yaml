@@ -1,0 +1,13 @@
+conf:
+  listen:
+    port: 9000
+  etcd:
+    endpoints:
+      - etcd:2379
+
+authentication:
+  secert: secert
+  expire_time: 3600
+  users:
+    - username: admin
+      password: admin

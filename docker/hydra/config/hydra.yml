@@ -1,0 +1,26 @@
+serve:
+  cookies:
+    same_site_mode: Lax
+
+urls:
+  self:
+    issuer: http://hydra:4444
+  consent: http://127.0.0.1:3001/consent
+  login: http://127.0.0.1:3001/
+  logout: http://127.0.0.1:3001/logout
+  error: http://127.0.0.1:3001/
+
+secrets:
+  system:
+    - youReallyNeedToChangeThis
+
+oidc:
+  subject_identifiers:
+    supported_types:
+      - pairwise
+      - public
+    pairwise:
+      salt: youReallyNeedToChangeThis
+
+strategies:
+  access_token: opaque

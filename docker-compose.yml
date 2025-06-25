@@ -1,0 +1,200 @@
+services:
+  etcd:
+    image: bitnami/etcd:3.5
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_ADVERTISE_CLIENT_URLS=http://0.0.0.0:2379
+    networks:
+      - intranet
+
+  apisix:
+    image: apache/apisix
+    depends_on:
+      - etcd
+    ports:
+      - "9080:9080"    # HTTP endpoint
+      - "9180:9180"    # Admin-API
+    volumes:
+      - ./docker/apisix/config.yaml:/usr/local/apisix/conf/config.yaml
+    environment:
+      - APISIX_ENABLE_ADMIN=true
+      - APISIX_ADMIN_KEY=supersecret
+      - APSIX_ETCD_HOST=http://etcd:2379
+    networks:
+      - intranet
+
+  apisix-dashboard:
+    image: apache/apisix-dashboard
+    depends_on:
+      - apisix
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./docker/apisix_dashboard_conf/config.yaml:/usr/local/apisix-dashboard/conf/conf.yaml
+    environment:
+      - DEFAULT_APISIX_ADMIN_KEY=supersecret
+      - APISIX_LISTEN_ADDRESS=http://apisix:9180
+    networks:
+      - intranet
+
+  kratos-migrate:
+    image: oryd/kratos:v1.3.1
+    environment:
+      - DSN=postgres://kratos:secret@kratos-pg:5432/kratos?sslmode=disable&max_conns=20&max_idle_conns=4
+    volumes:
+      - type: bind
+        source: ./docker/kratos/configs
+        target: /etc/config/kratos
+    depends_on:
+        - kratos-pg
+    command: -c /etc/config/kratos/kratos.yml migrate sql -e --yes
+    restart: on-failure
+    networks:
+      - intranet
+
+  kratos-pg:
+    image: postgres:17
+    environment:
+      - POSTGRES_USER=kratos
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=kratos
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kratos"]
+    networks:
+      - intranet
+
+  # Example selfservice UI for Kratos
+  kratos-selfservice-ui-node:
+    image: oryd/kratos-selfservice-ui-node:v1.3.1
+    ports:
+      - "4455:3000"
+    environment:
+      - KRATOS_PUBLIC_URL=http://kratos:4433/
+      - KRATOS_BROWSER_URL=http://127.0.0.1:4433/
+      - COOKIE_SECRET=changeme
+      - CSRF_COOKIE_NAME=ory_csrf_ui
+      - CSRF_COOKIE_SECRET=changeme
+    networks:
+      - intranet
+    restart: on-failure
+
+  kratos:
+    depends_on:
+      - kratos-migrate
+    image: oryd/kratos:v1.3.1
+    ports:
+      - '4433:4433' # public
+      - '4434:4434' # admin
+    restart: unless-stopped
+    environment:
+      - DSN=postgres://kratos:secret@kratos-pg:5432/kratos?sslmode=disable&max_conns=20&max_idle_conns=4
+      - LOG_LEVEL=trace
+    command: serve -c /etc/config/kratos/kratos.yml --dev --watch-courier
+    volumes:
+      - type: bind
+        source: ./docker/kratos/configs
+        target: /etc/config/kratos
+    networks:
+      - intranet
+
+  # Mail service for testing email flows
+  mailslurper:
+    image: oryd/mailslurper:latest-smtps
+    ports:
+      - '4436:4436'
+      - '4437:4437'
+    networks:
+      - intranet
+
+  hydra-migrate:
+    image: oryd/hydra:v2.3.0
+    depends_on:
+      - hydra-pg
+    environment:
+      - DSN=postgres://hydra:secret@hydra-pg:5432/hydra?sslmode=disable
+    command: migrate -c /etc/config/hydra/hydra.yml sql up -e --yes
+    volumes:
+      - type: bind
+        source: ./docker/hydra/config
+        target: /etc/config/hydra
+    networks:
+      - intranet
+    restart: on-failure
+
+  hydra-pg:
+    image: postgres:17
+    environment:
+      - POSTGRES_USER=hydra
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=hydra
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U hydra" ]
+    networks:
+      - intranet
+
+  hydra:
+    image: oryd/hydra:v2.3.0
+    depends_on:
+      - hydra-migrate
+    ports:
+      - "4444:4444" # Public
+      - "4445:4445" # Admin
+    environment:
+      - DSN=postgres://hydra:secret@hydra-pg:5432/hydra?sslmode=disable
+      - LOG_LEVEL=trace
+      - OIDC_SUBJECT_IDENTIFIERS_SUPPORTED_TYPES=public
+    volumes:
+      - type: bind
+        source: ./docker/hydra/config
+        target: /etc/config/hydra
+    command: serve -c /etc/config/hydra/hydra.yml all --dev
+    networks:
+      - intranet
+    restart: unless-stopped
+
+  users:
+    build:
+      context: .
+      dockerfile: users.Dockerfile
+    environment:
+      - SERVICE_NAME=users
+      - PORT=8080
+    ports:
+      - "8081:8080"
+    networks:
+      - intranet
+
+  products:
+    build:
+      context: .
+      dockerfile: products.Dockerfile
+    environment:
+      - SERVICE_NAME=products
+      - PORT=8080
+    ports:
+      - "8082:8080"
+    networks:
+      - intranet
+
+  orders:
+    build:
+      context: .
+      dockerfile: orders.Dockerfile
+    environment:
+      - SERVICE_NAME=orders
+      - PORT=8080
+    ports:
+      - "8083:8080"
+    networks:
+      - intranet
+
+  hydra-token-page:
+    build:
+      context: ./docker/hydra
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    networks:
+      - intranet
+networks:
+  intranet:
